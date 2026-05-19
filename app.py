@@ -12,24 +12,44 @@ DATA_START = datetime.date(2027, 12, 5)
 RATA_STD = 1139.53
 DOBANDA_FIXA = 0.03875
 
+# --- MEMORIE PENTRU PLĂȚI MULTIPLE ---
+if 'plati_extra' not in st.session_state:
+    st.session_state.plati_extra = {}
+
 # --- MENIU LATERAL (SIDEBAR) ---
 st.sidebar.header("⚙️ Setări și Plăți Extra")
 var_rate = st.sidebar.number_input("Dobândă Var. Estimată An 11+ (%)", value=4.50, step=0.1) / 100
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Plăți Anticipate")
-recurent_extra = st.sidebar.number_input("➕ Plată extra LUNARĂ (€)", value=0.0, step=100.0, help="Suma pe care o plătești în plus în FIECARE lună.")
+st.sidebar.markdown("### 🔄 Plată extra LUNARĂ")
+recurent_extra = st.sidebar.number_input("Suma în plus FIECARE lună (€)", value=0.0, step=100.0)
 
-st.sidebar.markdown("**📌 Plăți unice (Lump Sum)**")
-st.sidebar.caption("Adaugă sume mari în luni specifice (ex: în luna 12 plătesc 5000€)")
-
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📌 Adaugă Plăți Unice")
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    lump_m1 = st.number_input("În luna nr:", value=0, step=1, key="lm1")
-    lump_m2 = st.number_input("În luna nr:", value=0, step=1, key="lm2")
+    luna_input = st.number_input("În luna nr:", min_value=1, value=1, step=1)
 with col2:
-    lump_a1 = st.number_input("Suma (€):", value=0.0, step=500.0, key="la1")
-    lump_a2 = st.number_input("Suma (€):", value=0.0, step=500.0, key="la2")
+    suma_input = st.number_input("Suma (€):", min_value=0.0, value=1000.0, step=100.0)
+
+# Butonul magic care salvează plata în memorie
+if st.sidebar.button("➕ Adaugă plata"):
+    if suma_input > 0:
+        if luna_input in st.session_state.plati_extra:
+            st.session_state.plati_extra[luna_input] += suma_input
+        else:
+            st.session_state.plati_extra[luna_input] = suma_input
+        st.sidebar.success(f"Adăugat {suma_input}€ în luna {luna_input}!")
+
+# Afișarea memoriei și buton de resetare
+if st.session_state.plati_extra:
+    st.sidebar.markdown("**Plăți salvate în memorie:**")
+    for luna, suma in sorted(st.session_state.plati_extra.items()):
+        st.sidebar.write(f"✔️ Luna {luna}: **{suma:,.0f} €**")
+    
+    if st.sidebar.button("🗑️ Șterge toate plățile unice"):
+        st.session_state.plati_extra = {}
+        st.rerun()
 
 # --- LOGICA DE CALCUL ---
 def add_months(sourcedate, months):
@@ -39,8 +59,7 @@ def add_months(sourcedate, months):
     day = min(sourcedate.day, [31,29 if year%4==0 and not year%400==0 else 28,31,30,31,30,31,31,30,31,30,31][month-1])
     return datetime.date(year, month, day)
 
-@st.cache_data
-def calculeaza_scadentar(sold, rata_std, dob_fixa, dob_var, extra_lunar, l1, a1, l2, a2):
+def calculeaza_scadentar(sold, rata_std, dob_fixa, dob_var, extra_lunar, plati_unice_dict):
     data = []
     c_sold = sold
     c_data = DATA_START
@@ -50,19 +69,17 @@ def calculeaza_scadentar(sold, rata_std, dob_fixa, dob_var, extra_lunar, l1, a1,
         if c_sold <= 0.01:
             break
             
-        # Din luna 121 aplicăm dobânda variabilă
         d_rate = dob_fixa if m <= 120 else dob_var
         dobanda_luna = c_sold * (d_rate / 12)
         
         plata_obligatorie = min(rata_std, c_sold + dobanda_luna)
         principal = plata_obligatorie - dobanda_luna
         
-        # Calculăm plățile extra
+        # Extragem plata din memorie pentru luna curentă (dacă există)
         extra = extra_lunar
-        if m == l1: extra += a1
-        if m == l2: extra += a2
-        
-        # Nu putem plăti în plus mai mult decât soldul rămas
+        if m in plati_unice_dict:
+            extra += plati_unice_dict[m]
+            
         extra = min(extra, c_sold - principal)
         if extra < 0: extra = 0
         
@@ -83,14 +100,11 @@ def calculeaza_scadentar(sold, rata_std, dob_fixa, dob_var, extra_lunar, l1, a1,
         
     return pd.DataFrame(data), total_dobanda, len(data)
 
-# Calculăm varianta standard (fără plăți extra) și varianta curentă
-df_baza, dob_baza, luni_baza = calculeaza_scadentar(SOLD_START, RATA_STD, DOBANDA_FIXA, var_rate, 0, 0, 0, 0, 0)
-df_nou, dob_nou, luni_nou = calculeaza_scadentar(SOLD_START, RATA_STD, DOBANDA_FIXA, var_rate, recurent_extra, lump_m1, lump_a1, lump_m2, lump_a2)
+df_baza, dob_baza, luni_baza = calculeaza_scadentar(SOLD_START, RATA_STD, DOBANDA_FIXA, var_rate, 0, {})
+df_nou, dob_nou, luni_nou = calculeaza_scadentar(SOLD_START, RATA_STD, DOBANDA_FIXA, var_rate, recurent_extra, st.session_state.plati_extra)
 
 # --- AFIȘARE INTERFAȚĂ ---
 st.markdown("### 📊 Cum se schimbă creditul tău")
-
-# Căsuțe metrice
 c1, c2, c3 = st.columns(3)
 c1.metric("Termini creditul în", f"{luni_nou//12} ani, {luni_nou%12} luni", f"-{luni_baza - luni_nou} luni salvate", delta_color="inverse")
 c2.metric("Dobândă Bancă", f"{dob_nou:,.0f} €", f"-{(dob_baza - dob_nou):,.0f} € salvați", delta_color="inverse")
@@ -98,9 +112,6 @@ c3.metric("Anul Finalizării", df_nou.iloc[-1]['Dată'][-4:])
 
 st.markdown("---")
 st.markdown("### 📉 Evoluția Soldului")
-st.caption("Vezi vizual cât de repede scade datoria față de varianta în care nu plătești nimic în avans.")
-
-# Grafic comparativ
 df_chart = pd.DataFrame({"Lună": range(1, luni_baza + 1)})
 df_chart = df_chart.merge(df_baza[['Lună', 'Sold Rămas (€)']].rename(columns={'Sold Rămas (€)': 'Fără Extra'}), on='Lună', how='left')
 df_chart = df_chart.merge(df_nou[['Lună', 'Sold Rămas (€)']].rename(columns={'Sold Rămas (€)': 'Cu Extra'}), on='Lună', how='left')
@@ -109,4 +120,10 @@ st.line_chart(df_chart, color=["#E74C3C", "#2ECC71"])
 
 st.markdown("---")
 st.markdown("### 🗓️ Scadențar Detaliat")
-st.dataframe(df_nou, use_container_width=True)
+
+# Colorare subtilă a plăților extra din tabel pentru a fi găsite mai ușor
+def highlight_extra(val):
+    color = 'background-color: #EAFAF1' if isinstance(val, (int, float)) and val > 0 else ''
+    return color
+
+st.dataframe(df_nou.style.map(highlight_extra, subset=['Extra (€)']), use_container_width=True)
