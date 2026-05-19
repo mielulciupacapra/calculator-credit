@@ -32,7 +32,7 @@ with col1:
 with col2:
     suma_input = st.number_input("Suma (€):", min_value=0.0, value=1000.0, step=100.0, key="suma_p_input")
 
-# Salvarea în memorie cu notificare pop-up (rezolvă bug-ul căsuței albe)
+# Salvarea în memorie cu notificare pop-up
 if st.sidebar.button("➕ Adaugă plata", key="add_btn"):
     if suma_input > 0:
         if luna_input in st.session_state.plati_extra:
@@ -126,11 +126,15 @@ st.line_chart(df_chart, color=["#E74C3C", "#2ECC71"])
 st.markdown("---")
 st.markdown("### 🗓️ Scadențar Detaliat")
 
+# Funcție modificată pentru Dark Mode (Fundal smarald + Text Alb + Bold)
 def highlight_extra(val):
-    color = 'background-color: #EAFAF1' if isinstance(val, (int, float)) and val > 0 else ''
-    return color
+    try:
+        if float(val) > 0:
+            return 'background-color: #117A65; color: white; font-weight: bold;'
+    except:
+        pass
+    return ''
 
-# Forțare afișare vizuală strict cu 2 zecimale (rezolvă problema .770000)
 if len(df_nou) > 0:
     df_styled = df_nou.style.format({
         "Rată Fixă (€)": "{:.2f}",
