@@ -18,38 +18,42 @@ if 'plati_extra' not in st.session_state:
 
 # --- MENIU LATERAL (SIDEBAR) ---
 st.sidebar.header("⚙️ Setări și Plăți Extra")
-var_rate = st.sidebar.number_input("Dobândă Var. Estimată An 11+ (%)", value=4.50, step=0.1) / 100
+var_rate = st.sidebar.number_input("Dobândă Var. Estimată An 11+ (%)", value=4.50, step=0.1, key="var_rate_input") / 100
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Plată extra LUNARĂ")
-recurent_extra = st.sidebar.number_input("Suma în plus FIECARE lună (€)", value=0.0, step=100.0)
+recurent_extra = st.sidebar.number_input("Suma în plus FIECARE lună (€)", value=0.0, step=100.0, key="recurent_input")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📌 Adaugă Plăți Unice")
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    luna_input = st.number_input("În luna nr:", min_value=1, value=1, step=1)
+    luna_input = st.number_input("În luna nr:", min_value=1, value=1, step=1, key="luna_p_input")
 with col2:
-    suma_input = st.number_input("Suma (€):", min_value=0.0, value=1000.0, step=100.0)
+    suma_input = st.number_input("Suma (€):", min_value=0.0, value=1000.0, step=100.0, key="suma_p_input")
 
-# Butonul magic care salvează plata în memorie
-if st.sidebar.button("➕ Adaugă plata"):
+# Salvarea în memorie cu notificare pop-up (rezolvă bug-ul căsuței albe)
+if st.sidebar.button("➕ Adaugă plata", key="add_btn"):
     if suma_input > 0:
         if luna_input in st.session_state.plati_extra:
             st.session_state.plati_extra[luna_input] += suma_input
         else:
             st.session_state.plati_extra[luna_input] = suma_input
-        st.sidebar.success(f"Adăugat {suma_input}€ în luna {luna_input}!")
-
-# Afișarea memoriei și buton de resetare
-if st.session_state.plati_extra:
-    st.sidebar.markdown("**Plăți salvate în memorie:**")
-    for luna, suma in sorted(st.session_state.plati_extra.items()):
-        st.sidebar.write(f"✔️ Luna {luna}: **{suma:,.0f} €**")
-    
-    if st.sidebar.button("🗑️ Șterge toate plățile unice"):
-        st.session_state.plati_extra = {}
+        st.toast(f"✅ Adăugat {suma_input:.2f}€ în luna {luna_input}!", icon="💰")
         st.rerun()
+
+# Listă pentru ștergerea INDIVIDUALĂ a plăților
+if st.session_state.plati_extra:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Plăți salvate (le poți șterge individual):**")
+    luni_salvate = sorted(list(st.session_state.plati_extra.keys()))
+    for luna in luni_salvate:
+        suma = st.session_state.plati_extra[luna]
+        col_txt, col_btn = st.sidebar.columns([3, 1])
+        col_txt.write(f"Luna {luna}: **{suma:,.2f} €**")
+        if col_btn.button("❌", key=f"del_{luna}"):
+            del st.session_state.plati_extra[luna]
+            st.rerun()
 
 # --- LOGICA DE CALCUL ---
 def add_months(sourcedate, months):
@@ -75,7 +79,6 @@ def calculeaza_scadentar(sold, rata_std, dob_fixa, dob_var, extra_lunar, plati_u
         plata_obligatorie = min(rata_std, c_sold + dobanda_luna)
         principal = plata_obligatorie - dobanda_luna
         
-        # Extragem plata din memorie pentru luna curentă (dacă există)
         extra = extra_lunar
         if m in plati_unice_dict:
             extra += plati_unice_dict[m]
@@ -108,7 +111,9 @@ st.markdown("### 📊 Cum se schimbă creditul tău")
 c1, c2, c3 = st.columns(3)
 c1.metric("Termini creditul în", f"{luni_nou//12} ani, {luni_nou%12} luni", f"-{luni_baza - luni_nou} luni salvate", delta_color="inverse")
 c2.metric("Dobândă Bancă", f"{dob_nou:,.0f} €", f"-{(dob_baza - dob_nou):,.0f} € salvați", delta_color="inverse")
-c3.metric("Anul Finalizării", df_nou.iloc[-1]['Dată'][-4:])
+if len(df_nou) > 0:
+    st.session_state.an_final = df_nou.iloc[-1]['Dată'][-4:]
+st.metric("Anul Finalizării", st.session_state.get('an_final', 'N/A'))
 
 st.markdown("---")
 st.markdown("### 📉 Evoluția Soldului")
@@ -121,9 +126,19 @@ st.line_chart(df_chart, color=["#E74C3C", "#2ECC71"])
 st.markdown("---")
 st.markdown("### 🗓️ Scadențar Detaliat")
 
-# Colorare subtilă a plăților extra din tabel pentru a fi găsite mai ușor
 def highlight_extra(val):
     color = 'background-color: #EAFAF1' if isinstance(val, (int, float)) and val > 0 else ''
     return color
 
-st.dataframe(df_nou.style.map(highlight_extra, subset=['Extra (€)']), use_container_width=True)
+# Forțare afișare vizuală strict cu 2 zecimale (rezolvă problema .770000)
+if len(df_nou) > 0:
+    df_styled = df_nou.style.format({
+        "Rată Fixă (€)": "{:.2f}",
+        "Dobândă L. (€)": "{:.2f}",
+        "Principal (€)": "{:.2f}",
+        "Extra (€)": "{:.2f}",
+        "Sold Rămas (€)": "{:.2f}"
+    }).map(highlight_extra, subset=['Extra (€)'])
+    st.dataframe(df_styled, use_container_width=True)
+else:
+    st.write("Creditul este complet achitat!")
